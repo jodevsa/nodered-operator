@@ -113,20 +113,19 @@ func (r *NoderedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	ingressList := svcFound.Status.LoadBalancer.Ingress
+	ingressurl := "Unknown"
 
 	if len(ingressList) > 0 {
-		ingressurl := svcFound.Status.LoadBalancer.Ingress[0].Hostname
+		ingressurl = svcFound.Status.LoadBalancer.Ingress[0].Hostname
+	}
 
-		if nodered.Status.PublicUrl != ingressurl {
-			nodered.Status.PublicUrl = ingressurl
-			err = r.Status().Update(ctx, nodered)
-			if err != nil {
-				log.Error(err, "Failed to update Nodered status")
-				return ctrl.Result{}, err
-			}
+	if nodered.Status.PublicUrl != ingressurl {
+		nodered.Status.PublicUrl = ingressurl
+		err = r.Status().Update(ctx, nodered)
+		if err != nil {
+			log.Error(err, "Failed to update Nodered status")
+			return ctrl.Result{}, err
 		}
-	} else {
-		return ctrl.Result{Requeue: true}, nil
 	}
 
 	return ctrl.Result{}, nil
@@ -243,6 +242,7 @@ func getPodNames(pods []corev1.Pod) []string {
 func (r *NoderedReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&cachev1alpha1.Nodered{}).
-		Owns(&appsv1.Deployment{}).
+		Owns(&appsv1.StatefulSet{}).
+		Owns(&corev1.Service{}).
 		Complete(r)
 }
