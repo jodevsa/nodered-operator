@@ -1,7 +1,0 @@
-apiVersion: cache.example.com/v1alpha1
-kind: Nodered
-metadata:
-  name: nodered-sample-4
-spec:
-  username: test
-  password: "123"

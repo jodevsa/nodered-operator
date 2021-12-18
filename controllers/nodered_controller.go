@@ -76,34 +76,24 @@ func (r *NoderedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, err
 	}
 
-	// Check if the deployment already exists, if not create a new one
 	found := &appsv1.StatefulSet{}
 	err = r.Get(ctx, types.NamespacedName{Name: nodered.Name, Namespace: nodered.Namespace}, found)
 	if err != nil && errors.IsNotFound(err) {
-		// Define a new deployment
+		// Define a new Statefulset
 		dep := r.statefulSetForNodered(nodered)
-		log.Info("Creating a new Deployment", "Deployment.Namespace", dep.Namespace, "Deployment.Name", dep.Name)
+		log.Info("Creating a new StatefulSet", "Statefulset.Namespace", dep.Namespace, "Statefulset.Name", dep.Name)
 		err = r.Create(ctx, dep)
 		if err != nil {
-			log.Error(err, "Failed to create new Deployment", "Deployment.Namespace", dep.Namespace, "Deployment.Name", dep.Name)
+			log.Error(err, "Failed to create new Statefulset", "Statefulset.Namespace", dep.Namespace, "Statefulset.Name", dep.Name)
 			return ctrl.Result{}, err
 		}
 
-		svc := r.serviceForNodered(nodered)
-		log.Info("Creating a new Service", "Service.Namespace", svc.Namespace, "Service.Name", svc.Name)
-		err = r.Create(ctx, svc)
-		if err != nil {
-			log.Error(err, "Failed to create new Service", "Service.Namespace", svc.Namespace, "Service.Name", svc.Name)
-			return ctrl.Result{}, err
-		}
-		// Deployment created successfully - return and requeue
 		return ctrl.Result{Requeue: true}, nil
 	} else if err != nil {
-		log.Error(err, "Failed to get Deployment")
+		log.Error(err, "Failed to get Statefulset")
 		return ctrl.Result{}, err
 	}
 
-	// Check if the service already exists, if not create a new one
 	svcFound := &corev1.Service{}
 	err = r.Get(ctx, types.NamespacedName{Name: nodered.Name + "-service", Namespace: nodered.Namespace}, svcFound)
 	if err != nil && errors.IsNotFound(err) {
@@ -118,13 +108,12 @@ func (r *NoderedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		// Deployment created successfully - return and requeue
 		return ctrl.Result{Requeue: true}, nil
 	} else if err != nil {
-		log.Error(err, "Failed to get Deployment")
+		log.Error(err, "Failed to get Service")
 		return ctrl.Result{}, err
 	}
 
 	ingressList := svcFound.Status.LoadBalancer.Ingress
 
-	log.Info("length", "length", len(ingressList))
 	if len(ingressList) > 0 {
 		ingressurl := svcFound.Status.LoadBalancer.Ingress[0].Hostname
 
