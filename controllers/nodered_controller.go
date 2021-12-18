@@ -76,21 +76,39 @@ func (r *NoderedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, err
 	}
 
-	found := &appsv1.StatefulSet{}
+	pvcFound := &corev1.PersistentVolumeClaim{}
+	err = r.Get(ctx, types.NamespacedName{Name: nodered.Name + "-pvc", Namespace: nodered.Namespace}, pvcFound)
+	if err != nil && errors.IsNotFound(err) {
+
+		pvc := r.pvcforNodred(nodered)
+		log.Info("Creating a new PVC", "PVC.Namespace", pvc.Namespace, "PVC.Name", pvc.Name)
+		err = r.Create(ctx, pvc)
+		if err != nil {
+			log.Error(err, "Failed to create new PVC", "PVC.Namespace", pvc.Namespace, "PVC.Name", pvc.Name)
+			return ctrl.Result{}, err
+		}
+		// Deployment created successfully - return and requeue
+		return ctrl.Result{Requeue: true}, nil
+	} else if err != nil {
+		log.Error(err, "Failed to get PVC")
+		return ctrl.Result{}, err
+	}
+
+	found := &appsv1.Deployment{}
 	err = r.Get(ctx, types.NamespacedName{Name: nodered.Name, Namespace: nodered.Namespace}, found)
 	if err != nil && errors.IsNotFound(err) {
-		// Define a new Statefulset
-		dep := r.statefulSetForNodered(nodered)
-		log.Info("Creating a new StatefulSet", "Statefulset.Namespace", dep.Namespace, "Statefulset.Name", dep.Name)
+		// Define a new deployment
+		dep := r.deploymentForNodered(nodered)
+		log.Info("Creating a new deployment", "deployment.Namespace", dep.Namespace, "deployment.Name", dep.Name)
 		err = r.Create(ctx, dep)
 		if err != nil {
-			log.Error(err, "Failed to create new Statefulset", "Statefulset.Namespace", dep.Namespace, "Statefulset.Name", dep.Name)
+			log.Error(err, "Failed to create new deployment", "deployment.Namespace", dep.Namespace, "deployment.Name", dep.Name)
 			return ctrl.Result{}, err
 		}
 
 		return ctrl.Result{Requeue: true}, nil
 	} else if err != nil {
-		log.Error(err, "Failed to get Statefulset")
+		log.Error(err, "Failed to get deployment")
 		return ctrl.Result{}, err
 	}
 
@@ -154,19 +172,29 @@ func (r *NoderedReconciler) serviceForNodered(m *cachev1alpha1.Nodered) *corev1.
 	return dep
 }
 
+func (r *NoderedReconciler) pvcforNodred(m *cachev1alpha1.Nodered) *corev1.PersistentVolumeClaim {
+	dep := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: m.Name + "-pvc", Namespace: m.Namespace},
+		Spec: corev1.PersistentVolumeClaimSpec{AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+			Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("1Gi")}}},
+	}
+	ctrl.SetControllerReference(m, dep, r.Scheme)
+	return dep
+}
+
 // deploymentForNodered returns a nodered Deployment object
-func (r *NoderedReconciler) statefulSetForNodered(m *cachev1alpha1.Nodered) *appsv1.StatefulSet {
+func (r *NoderedReconciler) deploymentForNodered(m *cachev1alpha1.Nodered) *appsv1.Deployment {
 	ls := labelsForNodered(m.Name)
 	replicas := int32(1)
 	userId := int64(1000)
 	rootUserId := int64(0)
 
-	dep := &appsv1.StatefulSet{
+	dep := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      m.Name,
 			Namespace: m.Namespace,
 		},
-		Spec: appsv1.StatefulSetSpec{
+		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,
 			Selector: &metav1.LabelSelector{
 				MatchLabels: ls,
@@ -176,6 +204,12 @@ func (r *NoderedReconciler) statefulSetForNodered(m *cachev1alpha1.Nodered) *app
 					Labels: ls,
 				},
 				Spec: corev1.PodSpec{
+					Volumes: []corev1.Volume{{
+						Name: "data",
+						VolumeSource: corev1.VolumeSource{
+							PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: m.Name + "-pvc"},
+						},
+					}},
 					SecurityContext: &corev1.PodSecurityContext{
 						RunAsUser: &userId,
 						FSGroup:   &userId,
@@ -211,11 +245,6 @@ func (r *NoderedReconciler) statefulSetForNodered(m *cachev1alpha1.Nodered) *app
 					}},
 				},
 			},
-			VolumeClaimTemplates: []corev1.PersistentVolumeClaim{{
-				ObjectMeta: metav1.ObjectMeta{Name: "data"},
-				Spec: corev1.PersistentVolumeClaimSpec{AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
-					Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("1Gi")}}},
-			}},
 		},
 	}
 	// Set Nodered instance as the owner and controller
@@ -242,7 +271,8 @@ func getPodNames(pods []corev1.Pod) []string {
 func (r *NoderedReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&cachev1alpha1.Nodered{}).
-		Owns(&appsv1.StatefulSet{}).
+		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
+		Owns(&corev1.PersistentVolumeClaim{}).
 		Complete(r)
 }
